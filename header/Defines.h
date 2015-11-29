@@ -35,7 +35,7 @@ struct FtpResult{
 #define REPL_125 FtpResult{125, "Data connection already open; transfer starting."}
 #define REPL_150 FtpResult{150, "File status okay; about to open data connection."}
 #define REPL_200 FtpResult{200, "Command okay."}
-#define REPL_221 FtpResult{221, "closed connecion!"};
+#define REPL_221 FtpResult{221, "Goodbye!"};
 #define REPL_226 FtpResult{226, "Closing data connection."}
 #define REPL_227 FtpResult{227, "Entering passive mode. "}
 #define REPL_425 FtpResult{425, "Can't open data connection."}

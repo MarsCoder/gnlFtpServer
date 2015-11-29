@@ -15,12 +15,14 @@
 #include <arpa/inet.h>
 #include <algorithm>
 #include <sstream>
+#include <regex>
 #include "../header/SocketEception.h"
 
 namespace gnl{
 
     FtpResult FtpSession::setUserName(std::string userName)
     {
+        std::transform(userName.begin(), userName.end(),userName.begin(),tolower);
         mUserName = userName;
         return FtpResult{331, "Please enter your password:"};
     }
@@ -31,12 +33,15 @@ namespace gnl{
             mIsLogin = true;
             return FtpResult{230, "Login successful."};
         }
-        return FtpResult{ 332, "Login failed! Please try again" };
+        return FtpResult{ 530, "Login failed! Please try again" };
     }
     /////////////////////////////////////////////////////////////////////////////////////////////////////
     FtpResult FtpSession::getSystem()
     {
-        return FtpResult{215, "Windows"};
+        if(!isLogin()){
+            return REPL_530;
+        }
+        return FtpResult{215, "Linux"};
     }
     /////////////////////////////////////////////////////////////////////////////////////////////////////
     FtpResult FtpSession::sendFileList()
@@ -54,7 +59,7 @@ namespace gnl{
 
         struct dirent *p_dirent = NULL;
         char line[256] = {'\0'};
-        DIR *dir = opendir(mWorkingDirectory.c_str());
+        DIR *dir = opendir(getFullPath().c_str());
 
         if(dir==NULL) {
             close(fd);
@@ -64,8 +69,9 @@ namespace gnl{
         }
         while((p_dirent = readdir(dir)) != NULL){
             struct stat s_buff;
-            std::string fileName = mWorkingDirectory;
+            std::string fileName = getFullPath();
             fileName.append("/").append(p_dirent->d_name);
+            //std::cout << fileName << std::endl;
             int status = stat(fileName.c_str(),&s_buff);
             if(status==0) {
                 getFileInfoStat(p_dirent->d_name,line,&s_buff);
@@ -89,62 +95,29 @@ namespace gnl{
         if(directory.empty()){
             return FtpResult{257, mWorkingDirectory};
         }
-        if(directory.size() > 1 && directory.back() == '/'){//  dir/
-            directory.pop_back();
+        char path[256] = {'\0'};
+        if(realpath(getFullPath(directory).c_str(),path) == nullptr){
+            std::cout << "get realpath error" << std::endl;
+            return FtpResult{550, "Failed to change the directory."};
         }
-        if(directory.size()>4 && directory.compare(0, 5, "../..") == 0){
+        std::string fileName(path);
+        if(fileName.size() == mRootDirectory.size()){
+            mWorkingDirectory = "/";
+            return FtpResult{257, mWorkingDirectory};
+        }else if(fileName.size() < mRootDirectory.size()){
             return REPL_501;
         }
-        if(directory.compare(".") == 0){
-            return FtpResult{257, mWorkingDirectory};
-        }else if(directory.compare("..") == 0){
-            if(mWorkingDirectory.compare(mRootDirectory) == 0){
-                return FtpResult{257, mWorkingDirectory};
-            }
-            int n = mWorkingDirectory.find_last_of('/');
-            if(n == 0) {
-                mWorkingDirectory.resize(1);
-            }
-            else {
-                mWorkingDirectory.resize(n);
-            }
-            return FtpResult{257, mWorkingDirectory};
-        }else if(directory.compare("/") == 0){
-            mWorkingDirectory = mRootDirectory;
-            return FtpResult{257, mWorkingDirectory};
-        }else if(directory.at(0) == '/'){
             struct stat s_buff;
-            std::string dir = mRootDirectory+directory;
-            int status = stat(dir.c_str(),&s_buff);
-            if(status != 0){
-                return REPL_451;
-            }
-            if(S_ISDIR(s_buff.st_mode)) {
-                mWorkingDirectory = mRootDirectory+directory;
-                return FtpResult{257, mWorkingDirectory};
-            }
-            return FtpResult{501, directory};
-        }
-        std::string fileName = mWorkingDirectory;
-        if(mWorkingDirectory.size() > 1) {
-            fileName.append("/").append(directory);
-        }else{
-            fileName.append(directory);
-        }
-        struct stat s_buff;
         int status = stat(fileName.c_str(),&s_buff);
         if(status != 0){
             return REPL_451;
         }
         if(S_ISDIR(s_buff.st_mode)) {
-            if(mWorkingDirectory.size() > 1) {
-                mWorkingDirectory.append("/").append(directory);
-            }else{
-                mWorkingDirectory.append(directory);
-            }
+            mWorkingDirectory.resize(fileName.size()-mRootDirectory.size(), '\0');
+            std::copy(fileName.begin()+mRootDirectory.size(), fileName.end(),mWorkingDirectory.begin());
             return FtpResult{257, mWorkingDirectory};
         }
-        return FtpResult{501, directory +  " is not a directory."};
+        return FtpResult{550, "Failed to change the directory."};
     }
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////
     FtpResult FtpSession::setPort(char* data){
@@ -224,14 +197,10 @@ namespace gnl{
         if(!isLogin()){
             return REPL_501;
         }
-        if(fileName.at(0) == '/'){
-            fileName = mRootDirectory + fileName;
-        }else{
-            fileName = mWorkingDirectory + "/" + fileName;
-        }
+        fileName = getFullPath(fileName);
         struct stat s_buff;
         int status = stat(fileName.c_str(),&s_buff);
-        if(status!=0 ){//|| S_ISDIR(s_buff.st_mode)) {
+        if(status!=0 || S_ISDIR(s_buff.st_mode)) {
             return REPL_501;
         }
         int dataFd = -1;
@@ -267,11 +236,7 @@ namespace gnl{
         if(!isLogin()){
             return REPL_501;
         }
-        if(fileName.at(0) == '/'){
-            fileName = mRootDirectory + fileName;
-        }else{
-            fileName = mWorkingDirectory + "/" + fileName;
-        }
+        fileName = getFullPath(fileName);
         int dataFd = -1;
         TcpSocket client(mDataPort, mDataAddr.c_str());
         if((dataFd = connectToClient(client)) == -1){
@@ -291,7 +256,6 @@ namespace gnl{
             close(fd);
             return REPL_451;
         }
-
         splice(dataFd, nullptr, pip[1], nullptr, 10240, SPLICE_F_MOVE);
         splice(pip[0], nullptr, fd, nullptr, 10240, SPLICE_F_MOVE);
         close(dataFd);
@@ -303,21 +267,24 @@ namespace gnl{
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////
     FtpResult FtpSession::changeWorkingDirectoryToRoot()
     {
-        mWorkingDirectory = mRootDirectory;
+        mWorkingDirectory = "/";
         return FtpResult{257, mWorkingDirectory};
     }
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////
     FtpResult FtpSession::getFileSize(std::string fileName)
     {
         struct stat s_buff;
+        fileName = getFullPath(fileName);
         int status = stat(fileName.c_str(),&s_buff);
         if(status!=0) {
             return REPL_501;
         }
+        if(S_ISDIR(s_buff.st_mode)){
+            return FtpResult{550, "could not get the file size."};
+        }
         std::stringstream size;
         size << s_buff.st_size;
         return FtpResult{213, size.str()};
-
     }
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////
     FtpResult FtpSession::quit()
@@ -361,7 +328,7 @@ namespace gnl{
                 mode[8] = (s_buff->st_mode & S_IWOTH)?'w':'-';
                 mode[9] = (s_buff->st_mode & S_IXOTH)?'x':'-';
                 strftime(date,13,"%b %d %H:%M",localtime(&(s_buff->st_mtime)));
-                sprintf(line,"%s %3d %-4s %-4s %8d %12s %s\r\n",mode,s_buff->st_nlink,pass_info->pw_name,group_info->gr_name,s_buff->st_size,date,file_name);
+                sprintf(line,"%s %3ld %-4s %-4s %8ld %12s %s\r\n",mode,s_buff->st_nlink,pass_info->pw_name,group_info->gr_name,s_buff->st_size,date,file_name);
                 return true;
             }
         }
@@ -468,5 +435,19 @@ namespace gnl{
             }
             return client.getMSockfd();
         }
+    }
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    std::string FtpSession::getFullPath(std::string fileName)
+    {
+        if(fileName.empty()){
+            fileName = mRootDirectory + mWorkingDirectory;
+        } else if(fileName.at(0) == '/' && mWorkingDirectory.size() == 1){
+            fileName = mRootDirectory + fileName;
+        }else if(fileName.at(0) == '/'){
+            fileName = mRootDirectory + mWorkingDirectory + fileName;
+        }else{
+            fileName = mRootDirectory + mWorkingDirectory + "/" + fileName;
+        }
+        return fileName;
     }
 }

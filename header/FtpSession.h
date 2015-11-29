@@ -30,8 +30,9 @@ public:
         if(mRootDirectory.empty()){
             char path[128] = {'\0'};
             getcwd(path, 128);
-            mWorkingDirectory = mRootDirectory = path;
+            mRootDirectory = path;
         }
+        mWorkingDirectory = "/";
     }
 
 public:
@@ -87,6 +88,7 @@ private:
     void printOpendirErrorMesg();
     int parsePortData(char* portData, char* clientAddr);
     int connectToClient(TcpSocket&);
+    std::string getFullPath(std::string = "");
 
 
 private:

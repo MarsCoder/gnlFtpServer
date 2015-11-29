@@ -38,16 +38,17 @@ namespace gnl{
         char command[16] = {'\0'};
         char *data =  getCommand(buf, command);
 
-
         FtpResult result;
         if(strcmp(command,"USER") == 0) {
             result = mSession.setUserName(data);
         } else if (strcmp(command, "PASS") == 0) {
             result = mSession.setUserPassword(data);
+        } else if(strcmp(command, "ACCT") == 0){
+            result = mSession.setUserName(data);
         } else if (strcmp(command, "SYST") == 0) {		//查找服务器的操作系统类型
             result = mSession.getSystem();
         } else if (strcmp(command,"PWD") == 0){	//回到父目录
-            result = mSession.changeWorkingDirectoryToRoot();
+            result = mSession.changeWorkingDirectory("/");
         } else if (strcmp(command, "TYPE") == 0) {		//参数指定表示类型
             result = REPL_200;
         } else if (strcmp(command, "PORT") == 0) {        //
@@ -72,8 +73,10 @@ namespace gnl{
             result = mSession.initSession();
         } else if(strcmp(command, "MODE") == 0) {
             result = REPL_504;
-        }else if(strcmp(command, "STRU")){
+        } else if(strcmp(command, "STRU")){
             result =  REPL_504;
+        } else if(strcmp(command, "NOOP") == 0){
+            result =  REPL_200;
         } else {
             result = REPL_500;
         }
