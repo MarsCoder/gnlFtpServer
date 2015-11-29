@@ -256,8 +256,21 @@ namespace gnl{
             close(fd);
             return REPL_451;
         }
-        splice(dataFd, nullptr, pip[1], nullptr, 10240, SPLICE_F_MOVE);
-        splice(pip[0], nullptr, fd, nullptr, 10240, SPLICE_F_MOVE);
+        int num = -1;
+        while(1) {
+            num = splice(dataFd, nullptr, pip[1], nullptr, 512, SPLICE_F_MOVE);
+            splice(pip[0], nullptr, fd, nullptr, 512, SPLICE_F_MOVE);
+            if(num == -1){
+                close(dataFd);
+                close(pip[0]);
+                close(pip[1]);
+                close(fd);
+                return {552, "receive error."};
+            }
+            if(num < 512){
+                break;
+            }
+        }
         close(dataFd);
         close(pip[0]);
         close(pip[1]);
